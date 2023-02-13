@@ -7,18 +7,25 @@
 #include <string>
 #include <vector>
 #include <stdlib.h>
-
+#include <time.h>
+static int A_LEN = 0, B_LEN = 0;
 #define M 3      
 #define MM -3    
 #define W -2     
-#define A_LEN 1000 
-#define B_LEN 1000
+//#define A_LEN 500
+//#define B_LEN 500
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
-
 __global__ void fill_gpu(Matrix h, Matrix d, char seqA[], char seqB[],const int *k);
-
+time_t t;
+ //  unsigned int tt = 1000;
+   //srand(n);
 void seq_gen(int n, char seq[]) {
+   //time_t t;
+   // unsigned int tt = 1000;
+   //srand(n);
+   //srand((unsigned) time(&t));
+   //std::cout << " " << t << std::endl;
   for (int i = 0; i < n; i++) {
     int base = rand() % 4;
     switch (base) {
@@ -92,12 +99,12 @@ int fill_cpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
     }
   }
 
-  std::cout << "Max score of " << full_max_val;
+  std::cout << "\nMax score of " << full_max_val;
   std::cout << " at id: " << full_max_id << std::endl;
   return full_max_id;
 }
 
-__global__ void fill_gpu(Matrix h, Matrix d, char seqA[], char seqB[], const int k, int max_id_val[]) {
+__global__ void fill_gpu(Matrix h, Matrix d, char seqA[], char seqB[], const int k, int max_id_val[],int alen,int blen) {
 
   int max_score = 0;
   int direction = 0;
@@ -105,8 +112,8 @@ __global__ void fill_gpu(Matrix h, Matrix d, char seqA[], char seqB[], const int
   int sim_score;
 
   int i = threadIdx.x + 1 + blockDim.x * blockIdx.x;
-  if (k > A_LEN + 1) {
-    i += (k - A_LEN);
+  if (k > alen + 1) {
+    i += (k - alen);
   }
   int j = ((k) - i) + 1;
   int id = i * h.width + j;
@@ -188,7 +195,7 @@ void traceback(Matrix d, int max_id, char seqA[], char seqB[],std::vector<char> 
 
 void io_seq(std::vector<char> &seqA_aligned, std::vector<char> &seqB_aligned) {
 
-  /*std::cout << "Aligned sub-sequences of A and B: " << std::endl;
+  std::cout << "Aligned sub-sequences of A and B: " << std::endl;
   int align_len = seqA_aligned.size();
   std::cout << "   ";
   for (int i = 0; i < align_len + 1; ++i) {
@@ -197,11 +204,11 @@ void io_seq(std::vector<char> &seqA_aligned, std::vector<char> &seqB_aligned) {
   std::cout << std::endl;
 
   std::cout << "   ";
-  for (int i = 0; i < align_len + 1; ++i) {
+  for (int i = 1; i < align_len + 1; ++i) {
     std::cout << seqB_aligned[align_len - i];
   }
   std::cout << std::endl << std::endl;
-  */
+  
 }
 
 void io_score(std::string file, Matrix h, char seqA[], char seqB[]) {
@@ -240,8 +247,8 @@ void smith_water_cpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
 
   io_seq(seqA_aligned, seqB_aligned);
 
-  io_score(std::string("score.dat"), h, seqA, seqB);
-  io_score(std::string("direction.dat"), d, seqA, seqB);
+  io_score(std::string("data files/score.dat"), h, seqA, seqB);
+  io_score(std::string("data files/direction.dat"), d, seqA, seqB);
 }
 
 void smith_water_gpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
@@ -263,8 +270,7 @@ void smith_water_gpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
   int *d_max_id_val;                   
   std::vector<int> h_max_id_val(2, 0); 
   cudaMalloc(&d_max_id_val, 2 * sizeof(int)); 
-  cudaMemcpy(d_max_id_val, h_max_id_val.data(), 2 * sizeof(int),
-             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_max_id_val, h_max_id_val.data(), 2 * sizeof(int),cudaMemcpyHostToDevice);
 
   cudaEvent_t start, stop;
   float time;
@@ -282,14 +288,12 @@ void smith_water_gpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
     if(diag_len / blks >= 1)  {
       dim3 dimBlock(diag_len / blks);
       dim3 dimGrid(blks);
-      fill_gpu<<<dimGrid, dimBlock>>>(d_h, d_d, d_seqA, d_seqB, i,
-                                    d_max_id_val);
+      fill_gpu<<<dimGrid, dimBlock>>>(d_h, d_d, d_seqA, d_seqB, i, d_max_id_val,A_LEN,B_LEN);
     }
     else {
       dim3 dimBlock(diag_len);
       dim3 dimGrid(1);
-      fill_gpu<<<dimGrid, dimBlock>>>(d_h, d_d, d_seqA, d_seqB, i,
-                                    d_max_id_val);
+      fill_gpu<<<dimGrid, dimBlock>>>(d_h, d_d, d_seqA, d_seqB, i,d_max_id_val, A_LEN, B_LEN);
     }
 
     cudaDeviceSynchronize();
@@ -298,8 +302,7 @@ void smith_water_gpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
   size_t size = (A_LEN + 1) * (B_LEN + 1) * sizeof(float);
   cudaMemcpy(d.elements, d_d.elements, size, cudaMemcpyDeviceToHost);
   cudaMemcpy(h.elements, d_h.elements, size, cudaMemcpyDeviceToHost);
-  cudaMemcpy(h_max_id_val.data(), d_max_id_val, 2 * sizeof(int),
-             cudaMemcpyDeviceToHost);
+  cudaMemcpy(h_max_id_val.data(), d_max_id_val, 2 * sizeof(int),cudaMemcpyDeviceToHost);
 
   
   int max_id = h_max_id_val[0];
@@ -311,12 +314,11 @@ void smith_water_gpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&time, start, stop);  
 
-  // visualize output
   io_seq(seqA_aligned, seqB_aligned);
-  io_score(std::string("score_gpu.dat"), h, seqA, seqB);
-  io_score(std::string("direction_gpu.dat"), d, seqA, seqB);
+  io_score(std::string("data files/score_gpu.dat"), h, seqA, seqB);
+  io_score(std::string("data files/direction_gpu.dat"), d, seqA, seqB);
 
-  std::cout << "   GPU time = " << time << " ms" << std::endl;
+  std::cout << "   GPU time = " << time << " ms\n" << std::endl;
 
   d_h.gpu_deallocate();
   d_d.gpu_deallocate();
@@ -326,10 +328,14 @@ void smith_water_gpu(Matrix h, Matrix d, char seqA[], char seqB[]) {
 }
 
 int main() {
-
- 
-  char seqA[A_LEN];
-  char seqB[B_LEN];
+  unsigned tt = (unsigned)time(&t);
+  srand(tt);
+  std::cout << "Enter length of sequence A: ";
+  std::cin >> A_LEN;
+  std::cout << "Enter length of sequence B: ";
+  std::cin >> B_LEN;
+  char seqA[10000];
+  char seqB[10000];
   seq_gen(A_LEN, seqA);
   seq_gen(B_LEN, seqB);
  
@@ -348,7 +354,8 @@ int main() {
     }
   }
 
-  io_score(std::string("init.dat"), scr_cpu, seqA, seqB);
+  std::cout << "\nInput size is :" << A_LEN <<std:: endl;
+  io_score(std::string("data files/init.dat"), scr_cpu, seqA, seqB);
 
   auto start_cpu = std::chrono::steady_clock::now();
   smith_water_cpu(scr_cpu, dir_cpu, seqA, seqB); 
